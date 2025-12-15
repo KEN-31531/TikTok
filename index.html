@@ -152,11 +152,46 @@
         .score.draw .score-value {
             color: #ffa726;
         }
+
+        .mode-selector {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .mode-btn {
+            background: #f8f9fa;
+            border: 2px solid #ddd;
+            padding: 10px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1em;
+            font-weight: 500;
+            color: #666;
+        }
+
+        .mode-btn:hover {
+            border-color: #ff9a56;
+            color: #ff6b6b;
+        }
+
+        .mode-btn.active {
+            background: linear-gradient(135deg, #ff9a56 0%, #ff6b6b 100%);
+            border-color: #ff6b6b;
+            color: white;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>井字遊戲</h1>
+
+        <div class="mode-selector">
+            <button class="mode-btn active" id="mode-pvp">雙人對戰</button>
+            <button class="mode-btn" id="mode-ai">人機對戰</button>
+        </div>
 
         <div class="score-board">
             <div class="score x">
@@ -168,7 +203,7 @@
                 <div class="score-value" id="score-draw">0</div>
             </div>
             <div class="score o">
-                <div class="score-label">玩家 O</div>
+                <div class="score-label" id="player-o-label">玩家 O</div>
                 <div class="score-value" id="score-o">0</div>
             </div>
         </div>
@@ -198,6 +233,7 @@
                 this.board = Array(9).fill('');
                 this.currentPlayer = 'X';
                 this.gameActive = true;
+                this.isAIMode = false;
                 this.scores = {
                     X: 0,
                     O: 0,
@@ -218,6 +254,9 @@
                 this.cells = document.querySelectorAll('.cell');
                 this.gameInfo = document.getElementById('game-info');
                 this.resetBtn = document.getElementById('reset-btn');
+                this.modePvpBtn = document.getElementById('mode-pvp');
+                this.modeAiBtn = document.getElementById('mode-ai');
+                this.playerOLabel = document.getElementById('player-o-label');
 
                 this.init();
             }
@@ -228,7 +267,23 @@
                 });
 
                 this.resetBtn.addEventListener('click', () => this.resetGame());
+                this.modePvpBtn.addEventListener('click', () => this.setMode(false));
+                this.modeAiBtn.addEventListener('click', () => this.setMode(true));
                 this.loadScores();
+            }
+
+            setMode(isAI) {
+                this.isAIMode = isAI;
+                if (isAI) {
+                    this.modePvpBtn.classList.remove('active');
+                    this.modeAiBtn.classList.add('active');
+                    this.playerOLabel.textContent = '電腦';
+                } else {
+                    this.modeAiBtn.classList.remove('active');
+                    this.modePvpBtn.classList.add('active');
+                    this.playerOLabel.textContent = '玩家 O';
+                }
+                this.resetGame();
             }
 
             handleCellClick(event) {
@@ -239,9 +294,18 @@
                     return;
                 }
 
+                // 人機模式下，如果是電腦的回合，不允許玩家點擊
+                if (this.isAIMode && this.currentPlayer === 'O') {
+                    return;
+                }
+
+                this.makeMove(index);
+            }
+
+            makeMove(index) {
                 this.board[index] = this.currentPlayer;
-                cell.textContent = this.currentPlayer;
-                cell.classList.add('taken', this.currentPlayer.toLowerCase());
+                this.cells[index].textContent = this.currentPlayer;
+                this.cells[index].classList.add('taken', this.currentPlayer.toLowerCase());
 
                 this.checkResult();
             }
@@ -263,7 +327,8 @@
                 }
 
                 if (roundWon) {
-                    this.gameInfo.innerHTML = `玩家 <span class="current-player">${this.currentPlayer}</span> 獲勝！`;
+                    const winnerName = this.isAIMode && this.currentPlayer === 'O' ? '電腦' : this.currentPlayer;
+                    this.gameInfo.innerHTML = `<span class="current-player">${winnerName}</span> 獲勝！`;
                     this.gameActive = false;
                     this.highlightWinningCells(winningCombination);
                     this.updateScore(this.currentPlayer);
@@ -278,7 +343,65 @@
                 }
 
                 this.currentPlayer = this.currentPlayer === 'X' ? 'O' : 'X';
-                this.gameInfo.innerHTML = `目前玩家: <span class="current-player">${this.currentPlayer}</span>`;
+                const playerName = this.isAIMode && this.currentPlayer === 'O' ? '電腦' : this.currentPlayer;
+                this.gameInfo.innerHTML = `目前玩家: <span class="current-player">${playerName}</span>`;
+
+                // 如果是 AI 模式且輪到電腦，讓電腦下棋
+                if (this.isAIMode && this.currentPlayer === 'O' && this.gameActive) {
+                    setTimeout(() => this.aiMove(), 500);
+                }
+            }
+
+            aiMove() {
+                // 簡單的 AI：30% 的時候會嘗試聰明的下法，70% 隨機
+                const shouldBeSmart = Math.random() < 0.3;
+                let move;
+
+                if (shouldBeSmart) {
+                    // 嘗試找到好的位置（阻擋玩家或完成自己的連線）
+                    move = this.findSmartMove();
+                }
+
+                if (move === undefined) {
+                    // 隨機選擇空位
+                    const emptyIndices = this.board
+                        .map((cell, index) => cell === '' ? index : null)
+                        .filter(index => index !== null);
+
+                    if (emptyIndices.length > 0) {
+                        move = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+                    }
+                }
+
+                if (move !== undefined) {
+                    this.makeMove(move);
+                }
+            }
+
+            findSmartMove() {
+                // 檢查是否可以贏
+                for (let condition of this.winningConditions) {
+                    const [a, b, c] = condition;
+                    const values = [this.board[a], this.board[b], this.board[c]];
+
+                    // 如果有兩個 O 和一個空位，就下在空位
+                    if (values.filter(v => v === 'O').length === 2 && values.includes('')) {
+                        return condition.find(i => this.board[i] === '');
+                    }
+                }
+
+                // 檢查是否需要阻擋玩家
+                for (let condition of this.winningConditions) {
+                    const [a, b, c] = condition;
+                    const values = [this.board[a], this.board[b], this.board[c]];
+
+                    // 如果玩家有兩個 X 和一個空位，就阻擋
+                    if (values.filter(v => v === 'X').length === 2 && values.includes('')) {
+                        return condition.find(i => this.board[i] === '');
+                    }
+                }
+
+                return undefined;
             }
 
             highlightWinningCells(combination) {
